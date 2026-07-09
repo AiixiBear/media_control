@@ -903,7 +903,7 @@ class _HeroCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 16),
                 _StatusChip(
-                  label: serverRunning ? '狗屎蜘蛛網頁服務員正在跑' : '伺服器嚴肅停止',
+                  label: serverRunning ? '正在跑' : '嚴肅停止',
                   color: serverRunning ? const Color(0xFF15C89A) : const Color(0xFFF59E0B),
                 ),
               ],
@@ -1055,7 +1055,7 @@ class _BackgroundProtectionCard extends StatelessWidget {
     return _PanelCard(
       title: '背景保護',
       subtitle: '簡單來說就是防止安卓大大殺你後台',
-      trailing: _StatusChip(label: enabled ? 'Running' : 'Stopped', color: accent),
+      trailing: _StatusChip(label: enabled ? '正在跑' : 'Stopped', color: accent),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
