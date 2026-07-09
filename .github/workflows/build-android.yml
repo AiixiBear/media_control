@@ -1,17 +1,21 @@
 name: Build and distribute
 
 on:
-  push:
-    branches:
-      - master
-  workflow_dispatch:
+  workflow_dispatch: # 👈 變成完全手動，你沒點按鈕，它絕對不會自己跑
+    inputs:
+      version:
+        description: '請輸入這次要發佈的版本號 (例如: v1.0.0)'
+        required: true
+        default: 'v1.0.0'
 
 jobs:
   build:
     name: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # 👈 讓 GitHub 幫你蓋上 Verified 章的關鍵權限
     steps:
-      - uses: actions/checkout@v4 
+      - uses: actions/checkout@v4
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -28,11 +32,14 @@ jobs:
         run: flutter pub get
 
       - name: Build APK
-        # 自己玩不需要設定 keystore 簽名，Flutter 會自動使用 debug 簽名編譯
         run: flutter build apk --release --split-per-abi
 
-      - name: Archive APK
-        uses: actions/upload-artifact@v4
+      - name: Create Verified Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: release-apk
-          path: build/app/outputs/flutter-apk/app-*.apk
+          tag_name: ${{ github.event.inputs.version }}
+          name: "自我測試版 ${{ github.event.inputs.version }}"
+          body: "此版本由 GitHub Actions 安全編譯生成。"
+          draft: false
+          prerelease: false
+          files: build/app/outputs/flutter-apk/app-*.apk
