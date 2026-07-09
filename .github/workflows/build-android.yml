@@ -1,0 +1,38 @@
+name: Build and distribute
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # 允許手動點擊按鈕觸發編譯
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4 # 升級至 v4 以獲得更好的穩定性與速度
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build APK
+        # 自己玩不需要設定 keystore 簽名，Flutter 會自動使用 debug 簽名編譯
+        run: flutter build apk --release --flavor dev
+
+      - name: Archive APK
+        uses: actions/upload-artifact@v4 # 升級至 v4 解決舊版套件產生的警告
+        with:
+          name: release-apk
+          path: build/app/outputs/flutter-apk/app-dev-release.apk
