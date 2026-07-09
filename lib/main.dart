@@ -169,8 +169,8 @@ class MediaControlServer {
       if (request.uri.path == '/api/home-assistant/media-player/command' && request.method == 'POST') {
         final body = await utf8.decoder.bind(request).join();
         final payload = body.isEmpty ? <String, dynamic>{} : jsonDecode(body) as Map<String, dynamic>;
-        final action = (payload['action'] as String? ?? '').trim();
-        final packageName = payload['packageName'] as String?;
+        final action = _extractHomeAssistantAction(payload);
+        final packageName = _extractStringField(payload, <String>['packageName', 'package_name']);
         final positionMs = _extractSeekPositionMs(payload);
 
         await _executeHomeAssistantAction(
@@ -283,7 +283,7 @@ class MediaControlServer {
       case 'seek':
       case 'seekTo':
         if (positionMs == null) {
-          throw ArgumentError('Seek action requires positionMs/position/seek_position in payload.');
+          throw ArgumentError('Seek action requires positionMs/position/seek_position in payload (root, data, or service_data).');
         }
         await api.seekTo(
           packageName: packageName,
@@ -298,18 +298,23 @@ class MediaControlServer {
   int? _extractSeekPositionMs(Map<String, dynamic> payload, {bool required = false}) {
     final msKeys = <String>['positionMs', 'position_ms', 'seek_position_ms'];
     final secondKeys = <String>['position', 'seek_position', 'media_position'];
+    final candidates = _candidatePayloads(payload);
 
-    for (final key in msKeys) {
-      final value = _toDouble(payload[key]);
-      if (value != null) {
-        return value.round().clamp(0, 1 << 31);
+    for (final candidate in candidates) {
+      for (final key in msKeys) {
+        final value = _toDouble(candidate[key]);
+        if (value != null) {
+          return value.round().clamp(0, 1 << 31);
+        }
       }
     }
 
-    for (final key in secondKeys) {
-      final value = _toDouble(payload[key]);
-      if (value != null) {
-        return (value * 1000).round().clamp(0, 1 << 31);
+    for (final candidate in candidates) {
+      for (final key in secondKeys) {
+        final value = _toDouble(candidate[key]);
+        if (value != null) {
+          return (value * 1000).round().clamp(0, 1 << 31);
+        }
       }
     }
 
@@ -317,6 +322,47 @@ class MediaControlServer {
       throw ArgumentError('Missing seek position. Provide positionMs or seek_position (seconds).');
     }
     return null;
+  }
+
+  String _extractHomeAssistantAction(Map<String, dynamic> payload) {
+    final action = _extractStringField(payload, <String>['action', 'command']);
+    if (action != null && action.trim().isNotEmpty) {
+      return action.trim();
+    }
+
+    final service = _extractStringField(payload, <String>['service']);
+    if (service != null && service.trim().isNotEmpty) {
+      final trimmed = service.trim();
+      final dotIndex = trimmed.lastIndexOf('.');
+      return dotIndex >= 0 ? trimmed.substring(dotIndex + 1) : trimmed;
+    }
+
+    return '';
+  }
+
+  String? _extractStringField(Map<String, dynamic> payload, List<String> keys) {
+    for (final candidate in _candidatePayloads(payload)) {
+      for (final key in keys) {
+        final raw = candidate[key];
+        if (raw is String && raw.trim().isNotEmpty) {
+          return raw.trim();
+        }
+      }
+    }
+    return null;
+  }
+
+  List<Map<String, dynamic>> _candidatePayloads(Map<String, dynamic> payload) {
+    final maps = <Map<String, dynamic>>[payload];
+    final data = payload['data'];
+    if (data is Map) {
+      maps.add(data.cast<String, dynamic>());
+    }
+    final serviceData = payload['service_data'];
+    if (serviceData is Map) {
+      maps.add(serviceData.cast<String, dynamic>());
+    }
+    return maps;
   }
 
   double? _toDouble(dynamic raw) {
