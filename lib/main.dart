@@ -4,9 +4,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'device_util.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await DeviceUtil.init();
   runApp(const MediaControlApp());
 }
 
@@ -438,11 +440,12 @@ class MediaSnapshot {
             ? 'playing'
             : 'paused';
 
+
     return <String, dynamic>{
-      'entity_id': entityId,
+      'entity_id': '${entityId}_${DeviceUtil.currentName.replaceAll(' ', '_').toLowerCase()}',
       'state': state,
       'attributes': <String, dynamic>{
-        'friendly_name': 'Media Control Hub',
+        'friendly_name': '大便媒體控制 - ${DeviceUtil.currentName}',
         'media_title': active?.title,
         'media_artist': active?.artist.isNotEmpty == true ? active?.artist : active?.displayArtist,
         'media_album_name': active?.album,
@@ -465,8 +468,8 @@ class MediaSnapshot {
 
   Map<String, dynamic> toHomeAssistantConfigJson(String entityId) {
     return <String, dynamic>{
-      'entity_id': entityId,
-      'name': 'Media Control Hub',
+      'entity_id': '${entityId}_${DeviceUtil.currentName.replaceAll(' ', '_').toLowerCase()}',
+      'name': '大便媒體控制 - ${DeviceUtil.currentName}',
       'unique_id': 'media_control_hub',
       'device_class': 'speaker',
       'features': <String>[
