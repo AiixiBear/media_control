@@ -1,7 +1,7 @@
 name: Build and distribute
 
 on:
-  workflow_dispatch: # 👈 變成完全手動，你沒點按鈕，它絕對不會自己跑
+  workflow_dispatch:
     inputs:
       version:
         description: '請輸入這次要發佈的版本號 (例如: v1.0.0)'
@@ -13,7 +13,8 @@ jobs:
     name: build
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 👈 讓 GitHub 幫你蓋上 Verified 章的關鍵權限
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
