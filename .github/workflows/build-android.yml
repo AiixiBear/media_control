@@ -1,8 +1,5 @@
 name: Build and distribute
 
-on:
-  workflow_dispatch: # 允許手動點擊按鈕觸發編譯
-
 jobs:
   build:
     name: build
