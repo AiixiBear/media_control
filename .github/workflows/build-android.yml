@@ -40,5 +40,5 @@ jobs:
           VERSION: ${{ github.event.inputs.version }}
         run: |
           gh release create "$VERSION" build/app/outputs/flutter-apk/app-*.apk \
-            --title "自我測試版 $VERSION" \
-            --notes "此版本由 GitHub Actions 安全編譯生成。"
+            --title "$VERSION" \
+            --notes "此版本由 GitHub Actions 生成。"
