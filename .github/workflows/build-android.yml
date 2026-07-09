@@ -29,10 +29,10 @@ jobs:
 
       - name: Build APK
         # 自己玩不需要設定 keystore 簽名，Flutter 會自動使用 debug 簽名編譯
-        run: flutter build apk --release --flavor dev --split-per-abi
+        run: flutter build apk --release --split-per-abi
 
       - name: Archive APK
         uses: actions/upload-artifact@v4
         with:
           name: release-apk
-          path: build/app/outputs/flutter-apk/app-dev-*.apk
+          path: build/app/outputs/flutter-apk/app-*.apk
