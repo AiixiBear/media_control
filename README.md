@@ -45,3 +45,12 @@ Supported actions include `media_play`, `media_pause`, `media_play_pause`, `medi
 ## 關於本App語言
 
 本App是繁體中文為主，但是你可能會看不懂使用者介面裡面的語法，那是因為我採用了狗屎語法，我開心就好
+
+## License
+
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+
+### ⚠️ App Icon Exception
+Please note that the **App Icon** (`assets/images/`) is **NOT** covered by the MIT License. 
+* All rights are reserved to the author.
+* You may not use, modify, or redistribute the icon for your own projects without explicit permission.
