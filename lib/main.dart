@@ -171,7 +171,7 @@ class MediaControlServer {
         final payload = body.isEmpty ? <String, dynamic>{} : jsonDecode(body) as Map<String, dynamic>;
         final action = (payload['action'] as String? ?? '').trim();
         final packageName = payload['packageName'] as String?;
-        final positionMs = (payload['positionMs'] as num?)?.round();
+        final positionMs = _extractSeekPositionMs(payload);
 
         await _executeHomeAssistantAction(
           action: action,
@@ -204,7 +204,7 @@ class MediaControlServer {
             break;
           case 'seek':
           case 'seekTo':
-            final positionMs = (payload['positionMs'] as num?)?.round() ?? 0;
+            final positionMs = _extractSeekPositionMs(payload, required: true)!;
             await api.seekTo(
               packageName: packageName,
               position: Duration(milliseconds: positionMs),
@@ -222,6 +222,12 @@ class MediaControlServer {
 
       request.response.statusCode = HttpStatus.notFound;
       _writeJson(request.response, <String, dynamic>{'error': 'Not found'});
+    } on FormatException catch (error) {
+      request.response.statusCode = HttpStatus.badRequest;
+      _writeJson(request.response, <String, dynamic>{'error': error.message});
+    } on ArgumentError catch (error) {
+      request.response.statusCode = HttpStatus.badRequest;
+      _writeJson(request.response, <String, dynamic>{'error': error.message ?? error.toString()});
     } catch (error) {
       request.response.statusCode = HttpStatus.internalServerError;
       _writeJson(request.response, <String, dynamic>{'error': error.toString()});
@@ -276,14 +282,54 @@ class MediaControlServer {
       case 'media_seek':
       case 'seek':
       case 'seekTo':
+        if (positionMs == null) {
+          throw ArgumentError('Seek action requires positionMs/position/seek_position in payload.');
+        }
         await api.seekTo(
           packageName: packageName,
-          position: Duration(milliseconds: positionMs ?? 0),
+          position: Duration(milliseconds: positionMs),
         );
         return;
       default:
         throw ArgumentError('Unknown Home Assistant action: $action');
     }
+  }
+
+  int? _extractSeekPositionMs(Map<String, dynamic> payload, {bool required = false}) {
+    final msKeys = <String>['positionMs', 'position_ms', 'seek_position_ms'];
+    final secondKeys = <String>['position', 'seek_position', 'media_position'];
+
+    for (final key in msKeys) {
+      final value = _toDouble(payload[key]);
+      if (value != null) {
+        return value.round().clamp(0, 1 << 31);
+      }
+    }
+
+    for (final key in secondKeys) {
+      final value = _toDouble(payload[key]);
+      if (value != null) {
+        return (value * 1000).round().clamp(0, 1 << 31);
+      }
+    }
+
+    if (required) {
+      throw ArgumentError('Missing seek position. Provide positionMs or seek_position (seconds).');
+    }
+    return null;
+  }
+
+  double? _toDouble(dynamic raw) {
+    if (raw == null) {
+      return null;
+    }
+    if (raw is num) {
+      return raw.toDouble();
+    }
+    if (raw is String) {
+      return double.tryParse(raw.trim());
+    }
+    return null;
   }
 }
 

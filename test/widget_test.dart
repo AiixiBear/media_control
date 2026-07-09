@@ -69,7 +69,7 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('Background protection'), findsOneWidget);
+    expect(find.text('蜘蛛網UI終點'), findsOneWidget);
     expect(find.text('現在正在玩'), findsOneWidget);
   });
 }
