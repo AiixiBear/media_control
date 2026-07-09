@@ -1,4 +1,4 @@
-# media_control
+# 大便媒體控制
 
 Android Flutter app with a local Web UI for inspecting and controlling active media sessions on the phone.
 
@@ -40,3 +40,8 @@ Example command body:
 ```
 
 Supported actions include `media_play`, `media_pause`, `media_play_pause`, `media_next_track`, `media_previous_track`, and `media_seek`.
+
+
+## 關於本App語言
+
+本App是繁體中文為主，但是你可能會看不懂使用者介面裡面的語法，那是因為我採用了狗屎語法，我開心就好

@@ -1053,16 +1053,16 @@ class _BackgroundProtectionCard extends StatelessWidget {
     final accent = enabled ? const Color(0xFF15C89A) : const Color(0xFFF59E0B);
 
     return _PanelCard(
-      title: 'Background protection',
-      subtitle: 'Uses a persistent notification so Android is less likely to stop the app while media control is active.',
+      title: '背景保護',
+      subtitle: '簡單來說就是防止安卓大大殺你後台',
       trailing: _StatusChip(label: enabled ? 'Running' : 'Stopped', color: accent),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
             enabled
-                ? 'The keep-alive notification is active. Leave it running while other devices use the web dashboard.'
-                : 'Turn on the persistent notification to keep the local server and media bridge alive in the background.',
+                ? '保後台通知啟動，應該是不會被殺後台拉'
+                : '打開通知權限確保不會被安卓大大殺後台',
             style: const TextStyle(color: Colors.white70),
           ),
           const SizedBox(height: 12),
@@ -1804,8 +1804,8 @@ String _buildWebUiHtml() {
 <body>
   <main class="shell">
     <section class="hero">
-      <div class="eyebrow">本地媒體橋接</div>
-      <h1>透過區域網路，在任何裝置上遙控手機。</h1>
+      <div class="eyebrow">LOCAL</div>
+      <h1>大便媒體遙控</h1>
       <p class="lede">
         這個頁面會讀取安卓正在使用的媒體進程，顯示歌曲資訊與播放進度，並且可以送出播放、暫停、上一首、下一首、拖曲等控制指令。
       </p>
@@ -2000,5 +2000,5 @@ String _buildWebUiHtml() {
   </script>
 </body>
 </html>
-r''';
+''';
 }
