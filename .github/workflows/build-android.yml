@@ -14,7 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -35,12 +34,11 @@ jobs:
       - name: Build APK
         run: flutter build apk --release --split-per-abi
 
-      - name: Create Verified Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.inputs.version }}
-          name: "自我測試版 ${{ github.event.inputs.version }}"
-          body: "此版本由 GitHub Actions 安全編譯生成。"
-          draft: false
-          prerelease: false
-          files: build/app/outputs/flutter-apk/app-*.apk
+      - name: Create Verified Release via GitHub CLI
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          gh release create "$VERSION" build/app/outputs/flutter-apk/app-*.apk \
+            --title "自我測試版 $VERSION" \
+            --notes "此版本由 GitHub Actions 安全編譯生成。"
