@@ -31,8 +31,27 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # ✨ 步驟一：從 GitHub Secrets 還原金鑰檔案到 android/app/ 目錄下
+      - name: Decode Keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/my-release-key.keystore
+
+      # ✨ 步驟二：建立簽章設定檔，讓 Gradle 打包時能順利讀取秘密密碼
+      - name: Create key.properties
+        run: |
+          echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" > android/key.properties
+          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/key.properties
+          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/key.properties
+          echo "storeFile=my-release-key.keystore" >> android/key.properties
+
+      # ✨ 步驟三：打包 APK 並且注入手動輸入的版號與自動遞增的流水號
       - name: Build APK
-        run: flutter build apk --release --split-per-abi
+        run: |
+          # 把輸入的 'v1.0.0' 去掉開頭的 'v' 變成 '1.0.0'
+          CLEAN_VERSION=$(echo "${{ github.event.inputs.version }}" | sed 's/^v//')
+          
+          # build-name 帶入 1.0.0，build-number 帶入 GitHub 流水號 (例如 1, 2, 3...)
+          flutter build apk --release --split-per-abi --build-name=$CLEAN_VERSION --build-number=${{ github.run_number }}
 
       - name: Create Verified Release via GitHub CLI
         env:
@@ -41,4 +60,4 @@ jobs:
         run: |
           gh release create "$VERSION" build/app/outputs/flutter-apk/app-*.apk \
             --title "$VERSION" \
-            --notes "此版本由 GitHub Actions 生成。"
+            --notes "此版本由 GitHub Actions 生成。顯示版本：$VERSION，內部核心版號：+${{ github.run_number }}。已成功套用正式發行簽章。"
