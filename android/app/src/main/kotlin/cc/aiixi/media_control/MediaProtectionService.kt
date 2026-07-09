@@ -46,7 +46,7 @@ class MediaProtectionService : Service() {
         val webUrlLine = currentWebUrl?.let { "Web UI: $it" } ?: "Open the app to get the local Web UI URL"
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle("大便媒體控制")
             .setContentText(webUrlLine)
             .setStyle(
