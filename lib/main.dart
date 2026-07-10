@@ -833,7 +833,7 @@ class _MediaControlAppState extends State<MediaControlApp> with WidgetsBindingOb
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'S',
+      title: '大便媒體控制',
       theme: ThemeData(
         colorScheme: colorScheme,
         scaffoldBackgroundColor: const Color(0xFF07111D),
