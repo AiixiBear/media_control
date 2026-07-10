@@ -298,7 +298,7 @@ class MediaControlServer {
   }
 
   int? _extractSeekPositionMs(Map<String, dynamic> payload, {bool required = false}) {
-    final msKeys = <String>['positionMs', 'position_ms', 'seek_position_ms'];
+    final msKeys = <String>['positionMs', 'position_ms', 'seek_position_ms', 'seekPosition'];
     final secondKeys = <String>['position', 'seek_position', 'media_position'];
     final candidates = _candidatePayloads(payload);
 
