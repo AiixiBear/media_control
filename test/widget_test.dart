@@ -59,6 +59,16 @@ class FakeMediaControlApi implements MediaControlApi {
 }
 
 void main() {
+  test('password routes are scoped correctly', () {
+    const settings = ServerSettings(password: 'secret');
+
+    expect(settings.routePrefix, '/secret');
+    expect(settings.isPathAllowed('/secret/'), isTrue);
+    expect(settings.isPathAllowed('/secret/api/state'), isTrue);
+    expect(settings.isPathAllowed('/api/state'), isFalse);
+    expect(settings.isPathAllowed('/'), isFalse);
+  });
+
   testWidgets('App renders media control hub', (WidgetTester tester) async {
     await tester.pumpWidget(
       MediaControlApp(
@@ -69,7 +79,7 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('蜘蛛網UI終點'), findsOneWidget);
-    expect(find.text('現在正在玩'), findsOneWidget);
+    expect(find.text('蜘蛛網 UI 端點'), findsOneWidget);
+    expect(find.text('大便媒體控制'), findsWidgets);
   });
 }

@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'device_util.dart';
 
 void main() async {
@@ -97,24 +98,83 @@ class PlatformMediaControlApi implements MediaControlApi {
   }
 }
 
+class ServerSettings {
+  const ServerSettings({this.password = '', this.listenInterface = '0.0.0.0'});
+
+  final String password;
+  final String listenInterface;
+
+  String get normalizedPassword => password.trim();
+
+  String get routePrefix {
+    final cleanedPassword = normalizedPassword;
+    if (cleanedPassword.isEmpty) {
+      return '';
+    }
+    return '/$cleanedPassword';
+  }
+
+  String get normalizedListenInterface {
+    final cleanedInterface = listenInterface.trim();
+    if (cleanedInterface.isEmpty) {
+      return '0.0.0.0';
+    }
+    return cleanedInterface;
+  }
+
+  ServerSettings copyWith({String? password, String? listenInterface}) {
+    return ServerSettings(
+      password: password ?? this.password,
+      listenInterface: listenInterface ?? this.listenInterface,
+    );
+  }
+
+  bool isPathAllowed(String path) {
+    final cleanedPath = path.trim();
+    if (cleanedPath.isEmpty || cleanedPath == '/') {
+      return normalizedPassword.isEmpty;
+    }
+
+    if (normalizedPassword.isEmpty) {
+      return true;
+    }
+
+    final prefix = routePrefix;
+    return cleanedPath == prefix || cleanedPath == '$prefix/' || cleanedPath.startsWith('$prefix/');
+  }
+
+  String buildUrl(String host, int port) {
+    final baseUrl = 'http://$host:$port';
+    if (normalizedPassword.isEmpty) {
+      return baseUrl;
+    }
+    return '$baseUrl$routePrefix/';
+  }
+}
+
 class MediaControlServer {
   static const String homeAssistantEntityId = 'media_player.media_control_hub';
 
-  MediaControlServer({required this.api});
+  MediaControlServer({required this.api, ServerSettings? settings}) : _settings = settings ?? const ServerSettings();
 
   final MediaControlApi api;
   HttpServer? _server;
+  ServerSettings _settings;
 
   bool get isRunning => _server != null;
 
   int? get port => _server?.port;
+
+  void updateSettings(ServerSettings settings) {
+    _settings = settings;
+  }
 
   Future<Uri> start() async {
     if (_server != null) {
       return Uri.parse('http://127.0.0.1:${_server!.port}');
     }
 
-    final server = await HttpServer.bind(InternetAddress.anyIPv4, 8080);
+    final server = await HttpServer.bind(_resolveAddress(_settings.normalizedListenInterface), 8080);
     server.listen(
       _handleRequest,
       onError: (Object error, StackTrace stackTrace) {
@@ -123,6 +183,14 @@ class MediaControlServer {
     );
     _server = server;
     return Uri.parse('http://127.0.0.1:${server.port}');
+  }
+
+  InternetAddress _resolveAddress(String interfaceName) {
+    final normalized = interfaceName.trim();
+    if (normalized.isEmpty || normalized == '0.0.0.0' || normalized == 'all') {
+      return InternetAddress.anyIPv4;
+    }
+    return InternetAddress(normalized);
   }
 
   Future<void> stop() async {
@@ -142,33 +210,40 @@ class MediaControlServer {
       return;
     }
 
+    final normalizedPath = _normalizePath(request.uri.path);
+    if (_settings.normalizedPassword.isNotEmpty && !_settings.isPathAllowed(request.uri.path)) {
+      request.response.statusCode = HttpStatus.unauthorized;
+      _writeJson(request.response, <String, dynamic>{'error': '需要使用設定的密碼路徑'});
+      return;
+    }
+
     try {
-      if (request.uri.path == '/' && request.method == 'GET') {
+      if (normalizedPath == '/' && request.method == 'GET') {
         request.response.headers.contentType = ContentType.html;
         request.response.write(_buildWebUiHtml());
         await request.response.close();
         return;
       }
 
-      if (request.uri.path == '/api/state' && request.method == 'GET') {
+      if (normalizedPath == '/api/state' && request.method == 'GET') {
         final snapshot = await api.getSnapshot();
         _writeJson(request.response, snapshot.toJson());
         return;
       }
 
-      if (request.uri.path == '/api/home-assistant/media-player' && request.method == 'GET') {
+      if (normalizedPath == '/api/home-assistant/media-player' && request.method == 'GET') {
         final snapshot = await api.getSnapshot();
         _writeJson(request.response, snapshot.toHomeAssistantMediaPlayerJson(homeAssistantEntityId));
         return;
       }
 
-      if (request.uri.path == '/api/home-assistant/config' && request.method == 'GET') {
+      if (normalizedPath == '/api/home-assistant/config' && request.method == 'GET') {
         final snapshot = await api.getSnapshot();
         _writeJson(request.response, snapshot.toHomeAssistantConfigJson(homeAssistantEntityId));
         return;
       }
 
-      if (request.uri.path == '/api/home-assistant/media-player/command' && request.method == 'POST') {
+      if (normalizedPath == '/api/home-assistant/media-player/command' && request.method == 'POST') {
         final body = await utf8.decoder.bind(request).join();
         final payload = body.isEmpty ? <String, dynamic>{} : jsonDecode(body) as Map<String, dynamic>;
         final action = _extractHomeAssistantAction(payload);
@@ -185,8 +260,8 @@ class MediaControlServer {
         return;
       }
 
-      if (request.uri.path.startsWith('/api/control/') && request.method == 'POST') {
-        final action = request.uri.pathSegments.last;
+      if (normalizedPath.startsWith('/api/control/') && request.method == 'POST') {
+        final action = normalizedPath.split('/').last;
         final body = await utf8.decoder.bind(request).join();
         final payload = body.isEmpty ? <String, dynamic>{} : jsonDecode(body) as Map<String, dynamic>;
         final packageName = payload['packageName'] as String?;
@@ -223,7 +298,7 @@ class MediaControlServer {
       }
 
       request.response.statusCode = HttpStatus.notFound;
-      _writeJson(request.response, <String, dynamic>{'error': 'Not found'});
+      _writeJson(request.response, <String, dynamic>{'error': '找不到頁面'});
     } on FormatException catch (error) {
       request.response.statusCode = HttpStatus.badRequest;
       _writeJson(request.response, <String, dynamic>{'error': error.message});
@@ -234,6 +309,21 @@ class MediaControlServer {
       request.response.statusCode = HttpStatus.internalServerError;
       _writeJson(request.response, <String, dynamic>{'error': error.toString()});
     }
+  }
+
+  String _normalizePath(String path) {
+    if (_settings.normalizedPassword.isEmpty) {
+      return path.isEmpty ? '/' : path;
+    }
+
+    final prefix = _settings.routePrefix;
+    if (path == prefix || path == '$prefix/') {
+      return '/';
+    }
+    if (path.startsWith('$prefix/')) {
+      return path.substring(prefix.length);
+    }
+    return path.isEmpty ? '/' : path;
   }
 
   void _applyCorsHeaders(HttpResponse response) {
@@ -613,10 +703,13 @@ class _MediaControlAppState extends State<MediaControlApp> with WidgetsBindingOb
   Uri? _serverUri;
   String? _localAddress;
   String? _errorMessage;
+  ServerSettings _settings = const ServerSettings();
+  List<String> _availableInterfaces = <String>['0.0.0.0'];
   bool _backgroundProtectionEnabled = false;
   bool _startingServer = false;
   bool _startingBackgroundProtection = false;
   bool _refreshing = false;
+  bool _savingSettings = false;
 
   @override
   void initState() {
@@ -641,6 +734,7 @@ class _MediaControlAppState extends State<MediaControlApp> with WidgetsBindingOb
   }
 
   Future<void> _bootstrap() async {
+    await _loadSettings();
     if (widget.autoStartBackgroundProtection) {
       await _startBackgroundProtection();
     }
@@ -695,8 +789,15 @@ class _MediaControlAppState extends State<MediaControlApp> with WidgetsBindingOb
   }
 
   Future<void> _startServer() async {
-    if (_serverUri != null || _startingServer) {
+    if (_startingServer) {
       return;
+    }
+
+    if (_serverUri != null) {
+      final confirmed = await _confirmRestartServer();
+      if (!confirmed) {
+        return;
+      }
     }
 
     setState(() {
@@ -705,8 +806,11 @@ class _MediaControlAppState extends State<MediaControlApp> with WidgetsBindingOb
     });
 
     try {
+      if (_serverUri != null) {
+        await _server.stop();
+      }
       final uri = await _server.start();
-      final localAddress = await _findLocalAddress();
+      final localAddress = await _resolveServerAddress();
       if (!mounted) {
         return;
       }
@@ -736,7 +840,7 @@ class _MediaControlAppState extends State<MediaControlApp> with WidgetsBindingOb
       return;
     }
 
-    final webUrl = 'http://${_localAddress ?? 'localhost'}:${_serverUri!.port}';
+    final webUrl = _settings.buildUrl(_localAddress ?? 'localhost', _serverUri!.port);
     await widget.api.updateBackgroundProtectionNotification(webUrl: webUrl);
   }
 
@@ -781,7 +885,122 @@ class _MediaControlAppState extends State<MediaControlApp> with WidgetsBindingOb
     }
   }
 
-  Future<String?> _findLocalAddress() async {
+  Future<void> _loadSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final password = prefs.getString('server_password') ?? '';
+      final listenInterface = prefs.getString('server_listen_interface') ?? '0.0.0.0';
+      final interfaces = await _discoverInterfaces();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _settings = ServerSettings(password: password, listenInterface: listenInterface);
+        _availableInterfaces = interfaces;
+      });
+      _server.updateSettings(_settings);
+    } catch (_) {
+      final interfaces = await _discoverInterfaces();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _settings = const ServerSettings();
+        _availableInterfaces = interfaces;
+      });
+      _server.updateSettings(_settings);
+    }
+  }
+
+  Future<void> _saveSettings(ServerSettings settings) async {
+    setState(() {
+      _savingSettings = true;
+      _settings = settings;
+    });
+    _server.updateSettings(settings);
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('server_password', settings.normalizedPassword);
+      await prefs.setString('server_listen_interface', settings.normalizedListenInterface);
+      if (_serverUri != null) {
+        final confirmed = await _confirmRestartServer();
+        if (confirmed) {
+          await _startServer();
+        }
+      } else {
+        await _startServer();
+      }
+    } catch (_) {
+      // Ignore persistence failures and keep the in-memory settings active.
+    } finally {
+      if (mounted) {
+        setState(() {
+          _savingSettings = false;
+        });
+      }
+    }
+  }
+
+  Future<bool> _confirmRestartServer() async {
+    if (!mounted) {
+      return false;
+    }
+
+    return await showDialog<bool>(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF10253B),
+              title: const Text('重新啟動伺服器', style: TextStyle(color: Colors.white)),
+              content: const Text(
+                '設定已變更，是否要重新啟動伺服器以套用新的網址與權限設定？',
+                style: TextStyle(color: Colors.white70),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('取消', style: TextStyle(color: Colors.white70)),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('重新啟動'),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+  }
+
+  Future<List<String>> _discoverInterfaces() async {
+    final discovered = <String>{'0.0.0.0'};
+    try {
+      final interfaces = await NetworkInterface.list(
+        includeLinkLocal: false,
+        includeLoopback: false,
+        type: InternetAddressType.IPv4,
+      );
+
+      for (final networkInterface in interfaces) {
+        for (final address in networkInterface.addresses) {
+          if (!address.isLoopback && !address.address.startsWith('169.254.')) {
+            discovered.add(address.address);
+          }
+        }
+      }
+    } catch (_) {
+      // Fall back to the default list.
+    }
+    return discovered.toList()..sort();
+  }
+
+  Future<String?> _resolveServerAddress() async {
+    final preferredInterface = _settings.normalizedListenInterface;
+    if (preferredInterface != '0.0.0.0' && preferredInterface != 'all') {
+      return preferredInterface;
+    }
+
     try {
       final interfaces = await NetworkInterface.list(
         includeLinkLocal: false,
@@ -818,8 +1037,28 @@ class _MediaControlAppState extends State<MediaControlApp> with WidgetsBindingOb
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('URL copied to clipboard')),
+      const SnackBar(content: Text('網址已複製到剪貼簿')),
     );
+  }
+
+  Future<void> _openSettingsPage() async {
+    final settings = await Navigator.of(context).push<ServerSettings>(
+      MaterialPageRoute<ServerSettings>(
+        builder: (BuildContext context) {
+          return ServerSettingsPage(
+            initialSettings: _settings,
+            availableInterfaces: _availableInterfaces,
+            currentHost: _localAddress ?? 'localhost',
+            currentPort: _serverUri?.port ?? 8080,
+            onSave: _saveSettings,
+          );
+        },
+      ),
+    );
+
+    if (settings != null) {
+      await _saveSettings(settings);
+    }
   }
 
   @override
@@ -868,14 +1107,17 @@ class _MediaControlAppState extends State<MediaControlApp> with WidgetsBindingOb
                         serverError: _errorMessage,
                         onStartServer: _startServer,
                         onRefresh: _refreshSnapshot,
+                        onOpenSettings: _openSettingsPage,
                       ),
                       const SizedBox(height: 20),
                       _ServerCard(
                         serverUri: _serverUri,
-                        localAddress: _localAddress,
+                        displayUrl: _serverUri == null
+                            ? null
+                            : _settings.buildUrl(_localAddress ?? 'localhost', _serverUri!.port),
                         onCopy: _serverUri == null
                             ? null
-                            : () => _copyToClipboard('http://${_localAddress ?? 'localhost'}:${_serverUri!.port}'),
+                            : () => _copyToClipboard(_settings.buildUrl(_localAddress ?? 'localhost', _serverUri!.port)),
                       ),
                       const SizedBox(height: 20),
                       _BackgroundProtectionCard(
@@ -904,7 +1146,7 @@ class _MediaControlAppState extends State<MediaControlApp> with WidgetsBindingOb
                         )
                       else
                         _EmptyStateCard(
-                          title: '沒有媒體進程yet',
+                          title: '沒有媒體進程',
                           message: '去播音樂阿',
                         ),
                       const SizedBox(height: 20),
@@ -936,6 +1178,7 @@ class _HeroCard extends StatelessWidget {
     required this.serverError,
     required this.onStartServer,
     required this.onRefresh,
+    required this.onOpenSettings,
   });
 
   final MediaSnapshot snapshot;
@@ -944,6 +1187,7 @@ class _HeroCard extends StatelessWidget {
   final String? serverError;
   final Future<void> Function() onStartServer;
   final Future<void> Function() onRefresh;
+  final Future<void> Function() onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -1017,12 +1261,17 @@ class _HeroCard extends StatelessWidget {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.public),
-                  label: Text(serverRunning ? '重新啟動服務員' : 'Start server'),
+                  label: Text(serverRunning ? '重新啟動伺服器' : '啟動伺服器'),
                 ),
                 OutlinedButton.icon(
                   onPressed: onRefresh,
                   icon: const Icon(Icons.refresh),
-                  label: const Text('重刷媒體州'),
+                  label: const Text('重新整理媒體狀態'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: onOpenSettings,
+                  icon: const Icon(Icons.settings_outlined),
+                  label: const Text('設定'),
                 ),
               ],
             ),
@@ -1030,7 +1279,7 @@ class _HeroCard extends StatelessWidget {
               const SizedBox(height: 16),
               _InlineMessage(
                 icon: Icons.error_outline,
-                title: 'Server error',
+                title: '伺服器錯誤',
                 message: serverError!,
               ),
             ],
@@ -1045,29 +1294,29 @@ class _HeroCard extends StatelessWidget {
 class _ServerCard extends StatelessWidget {
   const _ServerCard({
     required this.serverUri,
-    required this.localAddress,
+    required this.displayUrl,
     required this.onCopy,
   });
 
   final Uri? serverUri;
-  final String? localAddress;
+  final String? displayUrl;
   final VoidCallback? onCopy;
 
   @override
   Widget build(BuildContext context) {
     return _PanelCard(
-      title: '蜘蛛網UI終點',
-      subtitle: '打開這個URL在其他裝置在同一個無線網路',
+      title: '蜘蛛網 UI 端點',
+      subtitle: '在同一個網路中的其他裝置上開啟這個網址',
       child: serverUri == null
           ? const Text(
-              'Start the server first to get a local URL.',
+              '先啟動伺服器，才能取得本機網址。',
               style: TextStyle(color: Colors.white70),
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 SelectableText(
-                  'http://${localAddress ?? 'localhost'}:${serverUri!.port}',
+                  displayUrl ?? 'http://localhost:${serverUri!.port}',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 18,
@@ -1086,7 +1335,7 @@ class _ServerCard extends StatelessWidget {
                         label: const Text('拷貝URL'),
                       ),
                     Text(
-                      '迴圈背面: http://127.0.0.1:${serverUri!.port}',
+                      'Loopback: http://127.0.0.1:${serverUri!.port}',
                       style: TextStyle(color: Colors.white.withValues(alpha: 0.72)),
                     ),
                   ],
@@ -1116,15 +1365,15 @@ class _PermissionCard extends StatelessWidget {
         children: <Widget>[
           Text(
             enabled
-                ? '這個應用程式可以讀取你媽的通知'
-                : '去啟用權限讓我可以看你通知拉齁',
+                ? '這個應用程式已可讀取通知。'
+                : '請啟用權限，讓我可以讀取通知內容。',
             style: const TextStyle(color: Colors.white70),
           ),
           const SizedBox(height: 12),
           FilledButton.icon(
             onPressed: () => onOpenSettings(),
             icon: const Icon(Icons.settings),
-            label: const Text('Open settings'),
+            label: const Text('開啟設定'),
           ),
         ],
       ),
@@ -1156,8 +1405,8 @@ class _BackgroundProtectionCard extends StatelessWidget {
         children: <Widget>[
           Text(
             enabled
-                ? '保後台通知啟動，應該是不會被殺後台拉'
-                : '打開通知權限確保不會被安卓大大殺後台',
+                ? '背景保護已啟動，應該不會那麼容易被系統切掉。'
+                : '開啟通知權限後，背景保護就能更穩定地運作。',
             style: const TextStyle(color: Colors.white70),
           ),
           const SizedBox(height: 12),
@@ -1170,7 +1419,7 @@ class _BackgroundProtectionCard extends StatelessWidget {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.notifications_active),
-            label: Text(enabled ? 'Restart protection' : 'Enable protection'),
+            label: Text(enabled ? '重新啟動保護' : '啟用保護'),
           ),
         ],
       ),
@@ -1204,10 +1453,10 @@ class _NowPlayingCard extends StatelessWidget {
     final positionLabel = formatDuration(session.positionMs);
 
     return _PanelCard(
-      title: '現在正在玩',
+      title: '現在正在播放',
       subtitle: session.appName,
       trailing: _StatusChip(
-        label: session.isPlaying ? '正在玩' : '已經暫停',
+        label: session.isPlaying ? '正在播放' : '已暫停',
         color: session.isPlaying ? const Color(0xFF15C89A) : const Color(0xFF60A5FA),
       ),
       child: Column(
@@ -1282,17 +1531,17 @@ class _NowPlayingCard extends StatelessWidget {
               OutlinedButton.icon(
                 onPressed: onPrevious,
                 icon: const Icon(Icons.skip_previous),
-                label: const Text('Previous'),
+                label: const Text('上一首'),
               ),
               FilledButton.icon(
                 onPressed: session.isPlaying ? onPause : onPlay,
                 icon: Icon(session.isPlaying ? Icons.pause : Icons.play_arrow),
-                label: Text(session.isPlaying ? 'Pause' : 'Play'),
+                label: Text(session.isPlaying ? '暫停' : '播放'),
               ),
               OutlinedButton.icon(
                 onPressed: onNext,
                 icon: const Icon(Icons.skip_next),
-                label: const Text('Next'),
+                label: const Text('下一首'),
               ),
             ],
           ),
@@ -1332,10 +1581,10 @@ class _SessionListCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _PanelCard(
-      title: '上線進程',
-      subtitle: '${sessions.length} 進程${sessions.length == 1 ? '' : ''} 偵測到',
+      title: '活躍進程',
+      subtitle: '${sessions.length} 個進程已偵測',
       child: sessions.isEmpty
-          ? const Text('就沒有啊', style: TextStyle(color: Colors.white70))
+          ? const Text('目前沒有可顯示的媒體進程。', style: TextStyle(color: Colors.white70))
           : Column(
               children: sessions
                   .map(
@@ -1391,7 +1640,7 @@ class _SessionListCard extends StatelessWidget {
                                     ),
                                   ),
                                   _StatusChip(
-                                    label: session.isPlaying ? 'Playing' : session.playbackState,
+                                    label: session.isPlaying ? '播放中' : session.playbackState,
                                     color: session.isPlaying ? const Color(0xFF15C89A) : const Color(0xFF64748B),
                                   ),
                                 ],
@@ -1414,17 +1663,17 @@ class _SessionListCard extends StatelessWidget {
                                   OutlinedButton.icon(
                                     onPressed: () => onPrevious(session),
                                     icon: const Icon(Icons.skip_previous),
-                                    label: const Text('Previous'),
+                                    label: const Text('上一首'),
                                   ),
                                   FilledButton.icon(
                                     onPressed: session.isPlaying ? () => onPause(session) : () => onPlay(session),
                                     icon: Icon(session.isPlaying ? Icons.pause : Icons.play_arrow),
-                                    label: Text(session.isPlaying ? 'Pause' : 'Play'),
+                                    label: Text(session.isPlaying ? '暫停' : '播放'),
                                   ),
                                   OutlinedButton.icon(
                                     onPressed: () => onNext(session),
                                     icon: const Icon(Icons.skip_next),
-                                    label: const Text('Next'),
+                                    label: const Text('下一首'),
                                   ),
                                 ],
                               ),
@@ -1493,7 +1742,7 @@ class _EmptyStateCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return _PanelCard(
       title: title,
-      subtitle: 'Waiting for media playback',
+      subtitle: '等待媒體播放',
       child: Text(message, style: const TextStyle(color: Colors.white70)),
     );
   }
@@ -1501,6 +1750,202 @@ class _EmptyStateCard extends StatelessWidget {
 
 
 
+
+class ServerSettingsPage extends StatefulWidget {
+  const ServerSettingsPage({
+    super.key,
+    required this.initialSettings,
+    required this.availableInterfaces,
+    required this.currentHost,
+    required this.currentPort,
+    required this.onSave,
+  });
+
+  final ServerSettings initialSettings;
+  final List<String> availableInterfaces;
+  final String currentHost;
+  final int currentPort;
+  final Future<void> Function(ServerSettings settings) onSave;
+
+  @override
+  State<ServerSettingsPage> createState() => _ServerSettingsPageState();
+}
+
+class _ServerSettingsPageState extends State<ServerSettingsPage> {
+  late final TextEditingController _passwordController;
+  late String _selectedInterface;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _passwordController = TextEditingController(text: widget.initialSettings.password);
+    _selectedInterface = widget.initialSettings.normalizedListenInterface;
+  }
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() {
+      _saving = true;
+    });
+
+    final settings = ServerSettings(
+      password: _passwordController.text,
+      listenInterface: _selectedInterface,
+    );
+
+    try {
+      await widget.onSave(settings);
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop(settings);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+        });
+      }
+    }
+  }
+
+  String get _previewUrl {
+    final settings = ServerSettings(
+      password: _passwordController.text,
+      listenInterface: _selectedInterface,
+    );
+    return settings.buildUrl(widget.currentHost, widget.currentPort);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('伺服器設定'),
+        backgroundColor: const Color(0xFF07111D),
+        foregroundColor: Colors.white,
+      ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: <Color>[
+              Color(0xFF08111F),
+              Color(0xFF0B1729),
+              Color(0xFF050B14),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  '設定本機 Web UI 的存取方式',
+                  style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '可為網址加上密碼前綴，並選擇要監聽的網路介面。',
+                  style: TextStyle(color: Colors.white.withValues(alpha: 0.72)),
+                ),
+                const SizedBox(height: 20),
+                _PanelCard(
+                  title: '密碼保護',
+                  subtitle: '輸入後，網址會變成 192.168.0.2/你的密碼/ 或 /你的密碼/api',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      TextField(
+                        controller: _passwordController,
+                        onChanged: (_) => setState(() {}),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          labelText: '密碼',
+                          labelStyle: const TextStyle(color: Colors.white70),
+                          suffixIcon: IconButton(
+                            icon: const Icon(Icons.clear, color: Colors.white70),
+                            onPressed: () {
+                              _passwordController.clear();
+                              setState(() {});
+                            },
+                          ),
+                          enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                          focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF5CE1E6))),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        '目前網址預覽：$_previewUrl',
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                _PanelCard(
+                  title: '監聽介面',
+                  subtitle: '選擇要開放的網路介面，預設為全部 IPv4。',
+                  child: DropdownButtonFormField<String>(
+                    value: _selectedInterface,
+                    decoration: const InputDecoration(
+                      labelText: '介面',
+                      labelStyle: TextStyle(color: Colors.white70),
+                      enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                      focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF5CE1E6))),
+                    ),
+                    dropdownColor: const Color(0xFF10253B),
+                    items: widget.availableInterfaces.map((String interface) {
+                      return DropdownMenuItem<String>(
+                        value: interface,
+                        child: Text(interface, style: const TextStyle(color: Colors.white)),
+                      );
+                    }).toList(growable: false),
+                    onChanged: (String? value) {
+                      if (value != null) {
+                        setState(() {
+                          _selectedInterface = value;
+                        });
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: _saving ? null : _save,
+                        icon: _saving
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.save_outlined),
+                        label: Text(_saving ? '儲存中...' : '儲存設定'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _PanelCard extends StatelessWidget {
   const _PanelCard({
@@ -1551,7 +1996,7 @@ class _PanelCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                ?trailing,
+                if (trailing != null) trailing!,
               ],
             ),
             const SizedBox(height: 16),

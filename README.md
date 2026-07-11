@@ -44,7 +44,7 @@ Supported actions include `media_play`, `media_pause`, `media_play_pause`, `medi
 
 ## 關於本App語言
 
-本App是繁體中文為主，但是你可能會看不懂使用者介面裡面的語法，那是因為我採用了狗屎語法，我開心就好
+本App是繁體中文為主
 
 ## License
 
