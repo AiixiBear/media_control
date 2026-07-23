@@ -24,6 +24,12 @@ Android Flutter app with a local Web UI for inspecting and controlling active me
 
 ## Home Assistant API
 
+Here is a simple Home Assistant Integration:
+
+[Home Assistant Integration](https://github.com/AiixiBear/media_control_ha)
+
+OR You can build one yourself:
+
 The local server also exposes Home Assistant-style REST endpoints:
 
 - `GET /api/home-assistant/config` returns entity metadata.
