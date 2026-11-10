@@ -1,0 +1,21 @@
+name: Test
+
+# Runs static analysis and the test suite on every push and pull request,
+# so auth, API parsing and settings regressions are caught before release.
+# The Android APK build lives in build-android.yml (manual trigger).
+on:
+  push:
+    branches: [master, 'improve/**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
