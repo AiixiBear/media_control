@@ -35,6 +35,13 @@ class _MediaControlAppState extends State<MediaControlApp>
   late final MediaControlServer _server;
   Timer? _pollTimer;
 
+  // The State's own context sits above the MaterialApp, so it has no
+  // Navigator/ScaffoldMessenger. Navigation, dialogs and snack bars must
+  // go through this key instead of Navigator.of(context) /
+  // ScaffoldMessenger.of(context), which throw and silently swallow the
+  // tap (e.g. the Settings button did nothing).
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
   MediaSnapshot? _snapshot;
   Uri? _serverUri;
   String? _localAddress;
@@ -321,8 +328,13 @@ class _MediaControlAppState extends State<MediaControlApp>
       return false;
     }
 
+    final dialogContext = _navigatorKey.currentContext;
+    if (dialogContext == null) {
+      return false;
+    }
+
     return await showDialog<bool>(
-          context: context,
+          context: dialogContext,
           builder: (BuildContext context) {
             return AlertDialog(
               backgroundColor: const Color(0xFF10253B),
@@ -412,20 +424,30 @@ class _MediaControlAppState extends State<MediaControlApp>
   }
 
   Future<void> _copyToClipboard(String text) async {
+    // Resolve the messenger before the await so no BuildContext is used
+    // across the async gap.
+    final messengerContext = _navigatorKey.currentContext;
+    final messenger = messengerContext == null
+        ? null
+        : ScaffoldMessenger.of(messengerContext);
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('網址已複製到剪貼簿')));
+    messenger?.showSnackBar(
+      const SnackBar(content: Text('網址已複製到剪貼簿')),
+    );
   }
 
   Future<void> _openSettingsPage() async {
     // The page calls onSave (_saveSettings) itself before popping, so
     // there is nothing to save again here; doing so would ask to restart
     // the server a second time.
-    await Navigator.of(context).push<ServerSettings>(
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) {
+      return;
+    }
+    await navigator.push<ServerSettings>(
       MaterialPageRoute<ServerSettings>(
         builder: (BuildContext context) {
           return ServerSettingsPage(
@@ -451,6 +473,7 @@ class _MediaControlAppState extends State<MediaControlApp>
     final activeSession = snapshot.activeSession;
 
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       debugShowCheckedModeBanner: false,
       title: '大便媒體控制',
       theme: ThemeData(

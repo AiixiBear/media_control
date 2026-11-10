@@ -82,4 +82,24 @@ void main() {
     expect(find.text('蜘蛛網 UI 端點'), findsOneWidget);
     expect(find.text('大便媒體控制'), findsWidgets);
   });
+
+  testWidgets('Settings button opens the settings page',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MediaControlApp(
+        api: FakeMediaControlApi(),
+        autoStartServer: false,
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    // Regression test: the Settings button used Navigator.of on the app
+    // State's context, which sits above the MaterialApp and has no
+    // Navigator, so the tap threw and silently did nothing on device.
+    await tester.tap(find.text('設定'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('密碼保護'), findsOneWidget);
+  });
 }
