@@ -79,6 +79,15 @@ String buildWebUiHtml({String updateMode = 'sse'}) {
   :focus-visible { outline: 2px solid var(--a1); outline-offset: 3px; border-radius: 12px; }
   [hidden] { display: none !important; }
 
+  /* ---------- 跑馬燈：文字比容器寬時來回滾動 ---------- */
+  .mq { overflow: hidden; min-width: 0; }
+  .mq > .mq-inner { display: inline-block; white-space: nowrap; vertical-align: top; will-change: transform; }
+  .mq.on > .mq-inner { animation: mq-scroll var(--mq-dur, 8s) ease-in-out infinite alternate; }
+  @keyframes mq-scroll {
+    0%, 8% { transform: translateX(0); }
+    92%, 100% { transform: translateX(var(--mq-x, 0px)); }
+  }
+
   /* ---------- 場景：封面模糊背景 ---------- */
   .scene { position: fixed; inset: 0; z-index: -1; overflow: hidden; background: var(--base); }
   .bg {
@@ -166,7 +175,7 @@ String buildWebUiHtml({String updateMode = 'sse'}) {
   .head { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
   .chip { display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; height: 34px; padding: 0 14px 0 12px; border-radius: 999px;
     font-size: 14px; font-weight: 600; color: var(--fg2); background: var(--glass-2); box-shadow: inset 0 0 0 1px var(--rim-soft); max-width: 100%; }
-  .chip .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip .name { min-width: 0; }
   .chip .state { color: var(--fg3); font-weight: 500; white-space: nowrap; }
   .eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; flex: none; }
   .eq i { width: 3px; height: 100%; border-radius: 2px; background: var(--a1); transform-origin: bottom; transform: scaleY(.28); }
@@ -176,10 +185,9 @@ String buildWebUiHtml({String updateMode = 'sse'}) {
   .stage.playing .eq i:nth-child(4) { animation-delay: -.7s; }
   @keyframes eq { 0%, 100% { transform: scaleY(.28); } 50% { transform: scaleY(1); } }
 
-  h1.title { text-wrap: balance; margin: 6px 0 0; font-size: clamp(30px, 3.5vw, 54px); line-height: 1.14; font-weight: 800; letter-spacing: -.02em;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-  .artist { margin: 0; font-size: clamp(17px, 1.5vw, 22px); font-weight: 600; color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .album { margin: 0; font-size: 15px; color: var(--fg3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  h1.title { margin: 6px 0 0; font-size: clamp(30px, 3.5vw, 54px); line-height: 1.14; font-weight: 800; letter-spacing: -.02em; min-width: 0; }
+  .artist { margin: 0; font-size: clamp(17px, 1.5vw, 22px); font-weight: 600; color: var(--fg2); min-width: 0; }
+  .album { margin: 0; font-size: 15px; color: var(--fg3); min-width: 0; }
 
   /* 切歌時的演出：封面淡入、文字由下方浮現 */
   .stage.swap .cover img, .stage.swap .cover .fallback { animation: coverIn .9s var(--ease) both; }
@@ -250,8 +258,8 @@ String buildWebUiHtml({String updateMode = 'sse'}) {
   .src .thumb img { width: 100%; height: 100%; object-fit: cover; }
   .src .thumb svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
   .src .meta { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-  .src .meta b { font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .src .meta span { font-size: 13px; color: var(--fg3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .src .meta b { font-size: 15px; font-weight: 700; min-width: 0; }
+  .src .meta span { font-size: 13px; color: var(--fg3); min-width: 0; }
   .src .st { width: 18px; height: 18px; color: var(--fg3); }
   .src .st .eq { height: 16px; }
   .src .st.is-play .eq i { animation: eq 1s ease-in-out infinite; }
@@ -471,6 +479,64 @@ function fmt(ms) {
 }
 function hash(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0; return Math.abs(h); }
 function setText(el, v) { if (el.textContent !== v) el.textContent = v; }
+
+/* ---------- 跑馬燈：文字比容器寬時來回滾動 ---------- */
+const mqPending = new Set();
+let mqRaf = 0;
+function scheduleMarquee(el) {
+  mqPending.add(el);
+  if (!mqRaf) mqRaf = requestAnimationFrame(flushMarquee);
+}
+function flushMarquee() {
+  mqRaf = 0;
+  mqPending.forEach((el) => measureMarquee(el));
+  mqPending.clear();
+}
+function measureMarquee(el) {
+  const inner = el.querySelector('.mq-inner');
+  if (!inner) return;
+  const avail = el.clientWidth;
+  if (!avail) return; // 元素被隱藏時先略過，等下次可見再量
+  const over = inner.scrollWidth - avail;
+  const cur = Number(el.dataset.over || 0);
+  if (Math.abs(over - cur) < 1) return;
+  el.dataset.over = String(over);
+  if (over > 6) {
+    el.style.setProperty('--mq-x', '-' + over + 'px');
+    el.style.setProperty('--mq-dur', Math.max(4, Math.min(18, over / 30)) + 's');
+    el.classList.remove('on');
+    void el.offsetWidth; // 讓動畫從頭開始
+    el.classList.add('on');
+  } else {
+    el.classList.remove('on');
+    el.style.removeProperty('--mq-x');
+    el.style.removeProperty('--mq-dur');
+  }
+}
+function setMarqueeText(el, text) {
+  let inner = el.firstElementChild;
+  if (!inner || !inner.classList.contains('mq-inner')) {
+    inner = document.createElement('span');
+    inner.className = 'mq-inner';
+    while (el.firstChild) inner.appendChild(el.firstChild);
+    el.appendChild(inner);
+    el.classList.add('mq');
+  }
+  if (inner.textContent !== text) {
+    inner.textContent = text;
+    delete el.dataset.over;
+    el.classList.remove('on');
+  }
+  scheduleMarquee(el);
+}
+addEventListener('resize', () => {
+  document.querySelectorAll('.mq').forEach((el) => {
+    delete el.dataset.over;
+    el.classList.remove('on');
+    scheduleMarquee(el);
+  });
+});
+
 function rgbToHsl(r, g, b) {
   r /= 255; g /= 255; b /= 255;
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn, l = (mx + mn) / 2;
@@ -691,11 +757,11 @@ function renderStage(a, snap) {
     }
   }
 
-  setText($('appName'), a.appName);
-  setText($('title'), a.title);
+  setMarqueeText($('appName'), a.appName);
+  setMarqueeText($('title'), a.title);
   const artist = a.artist || a.album || '未知演出者';
-  setText($('artist'), artist);
-  setText($('album'), a.artist && a.album ? a.album : '');
+  setMarqueeText($('artist'), artist);
+  setMarqueeText($('album'), a.artist && a.album ? a.album : '');
   $('album').hidden = !(a.artist && a.album);
   $('stateText').hidden = a.isPlaying;
   stage.classList.toggle('playing', !!a.isPlaying);
@@ -746,8 +812,8 @@ function renderRail(list, active) {
     el.classList.toggle('sel', !!active && s.packageName === active.packageName);
     el.setAttribute('aria-pressed', el.classList.contains('sel') ? 'true' : 'false');
     const meta = el.querySelector('.meta');
-    setText(meta.children[0], s.title);
-    setText(meta.children[1], s.appName + (s.artist ? ' / ' + s.artist : ''));
+    setMarqueeText(meta.children[0], s.title);
+    setMarqueeText(meta.children[1], s.appName + (s.artist ? ' / ' + s.artist : ''));
     const th = el.querySelector('.thumb');
     if (s.artworkDataUrl) {
       let im = th.querySelector('img');
